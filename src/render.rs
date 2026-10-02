@@ -5,6 +5,7 @@
 //! allocation, no GPU driver. When the tape is wider than the window the bitmap carries one extra
 //! window-width of repeated items, so wrapping around is seamless without a second blit.
 
+use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::mem::size_of;
 use std::ptr::null_mut;
@@ -16,12 +17,13 @@ use windows::core::{PCWSTR, w};
 use crate::worker::Entry;
 
 pub enum Content<'a> {
-    Quotes(&'a [Entry]),
-    /// A status line shown in place of quotes (loading, errors).
-    Message {
-        text: &'a str,
-        error: bool,
+    Quotes {
+        entries: &'a [Entry],
+        /// Display names by symbol; a symbol without one is drawn as it is.
+        names: &'a BTreeMap<String, String>,
     },
+    /// A status line shown in place of quotes (loading, errors).
+    Message { text: &'a str, error: bool },
 }
 
 pub const fn rgb(r: u8, g: u8, b: u8) -> COLORREF {
@@ -281,7 +283,10 @@ impl Renderer {
 
     fn layout(&self, content: Content) -> Vec<Item> {
         match content {
-            Content::Quotes(entries) => entries.iter().map(|e| self.quote_item(e)).collect(),
+            Content::Quotes { entries, names } => entries
+                .iter()
+                .map(|e| self.quote_item(e, names.get(&e.symbol).unwrap_or(&e.symbol)))
+                .collect(),
             Content::Message { text, error } => {
                 let color = if error { PALETTE.warn } else { PALETTE.dim };
                 vec![Item::new(vec![self.run(
@@ -295,9 +300,9 @@ impl Renderer {
         }
     }
 
-    fn quote_item(&self, entry: &Entry) -> Item {
+    fn quote_item(&self, entry: &Entry, label: &str) -> Item {
         let gap = self.scale(10);
-        let symbol = self.run(&entry.symbol, self.fonts.symbol, PALETTE.symbol, gap, 0);
+        let symbol = self.run(label, self.fonts.symbol, PALETTE.symbol, gap, 0);
         let Some(quote) = &entry.quote else {
             return Item::new(vec![
                 symbol,

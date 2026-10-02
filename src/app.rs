@@ -440,6 +440,8 @@ impl App {
     /// Re-lays-out the tape for the current data, size and fonts, then shows it.
     fn rebuild(&self) {
         let (width, height) = self.view.get();
+        // Cloned (it's an Arc) so no RefCell borrow of the config is held while drawing.
+        let config = self.config.borrow().clone();
         {
             let entries = self.entries.borrow();
             let note = self.note.borrow();
@@ -457,7 +459,10 @@ impl App {
                     error: note.error,
                 }
             } else {
-                Content::Quotes(&entries)
+                Content::Quotes {
+                    entries: &entries,
+                    names: &config.names,
+                }
             };
             self.render.borrow_mut().build(content, width, height);
         }

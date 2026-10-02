@@ -48,7 +48,28 @@ pause_on_hover = true
 ```
 
 Symbols use Yahoo Finance notation: stocks (`AAPL`), indices (`^GSPC`), crypto (`BTC-USD`), forex
-(`EURUSD=X`), futures (`GC=F`).
+(`EURUSD=X`), futures (`GC=F` gold, `CL=F` WTI crude, `BZ=F` Brent crude). The list order is the
+order on the ticker.
+
+An optional `[names]` section gives a symbol a friendlier label on the ticker, for example `Brent`
+instead of `BZ=F`:
+
+```toml
+symbols = ["AAPL", "BZ=F", "^GSPC"]
+
+[names]
+"BZ=F" = "Brent"
+"^GSPC" = "S&P 500"
+```
+
+Symbols are matched case-insensitively, a name keeps its capitalization, and symbols without a name
+are shown as they are. Keep `[names]` at the end of the file: TOML puts every key below a `[header]`
+inside that table.
+
+**Brent oil:** add `"BZ=F"` to `symbols`, as above. Yahoo has no CFD quotes (a CFD is a broker's
+product, so its price only comes from that broker); `BZ=F` is the Brent futures price that Brent
+CFDs track. It should be close to a broker's quote but can differ a little, notably around contract
+rollovers.
 
 To start with Windows, put a shortcut to the exe in the folder opened by <kbd>Win</kbd>+<kbd>R</kbd>
 → `shell:startup`.
