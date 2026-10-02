@@ -2,7 +2,7 @@
 //!
 //! Both live in `%APPDATA%\StockRock`.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
@@ -12,7 +12,7 @@ const DEFAULT_CONFIG: &str = r#"# StockRock configuration.
 # Save this file and the ticker reloads it automatically.
 
 # What to show, in Yahoo Finance notation: stocks (AAPL), indices (^GSPC, ^IXIC, ^DJI),
-# crypto (BTC-USD), forex (EURUSD=X), futures (GC=F).
+# crypto (BTC-USD), forex (EURUSD=X), futures (GC=F gold, CL=F WTI crude, BZ=F Brent crude).
 symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META", "^GSPC", "^IXIC", "BTC-USD"]
 
 # Seconds between price refreshes (minimum 5).
@@ -29,12 +29,21 @@ fps = 60
 
 # Pause scrolling while the mouse pointer is over the ticker.
 pause_on_hover = true
+
+# Optional display names, shown on the ticker instead of the symbol. Symbols with no name are
+# shown as they are. Keep this section last: every key below a [header] belongs to that table.
+# [names]
+# "BZ=F" = "Brent"
+# "^GSPC" = "S&P 500"
 "#;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub symbols: Vec<String>,
+    /// Display names by (normalized) symbol. A `BTreeMap` so that keys which collide once
+    /// normalized (`bz=f` and `BZ=F`) resolve the same way every time.
+    pub names: BTreeMap<String, String>,
     pub refresh_seconds: u64,
     pub scroll_speed: f64,
     pub font_size: f64,
@@ -51,6 +60,7 @@ impl Default for Config {
             ]
             .map(String::from)
             .to_vec(),
+            names: BTreeMap::new(),
             refresh_seconds: 30,
             scroll_speed: 60.0,
             font_size: 13.0,
@@ -73,6 +83,15 @@ impl Config {
         if self.symbols.is_empty() {
             return Err("`symbols` is empty".into());
         }
+        // Names are looked up by normalized symbol; a blank name falls back to the symbol itself.
+        self.names = self
+            .names
+            .into_iter()
+            .filter_map(|(symbol, name)| {
+                let (symbol, name) = (symbol.trim().to_uppercase(), name.trim().to_string());
+                (!symbol.is_empty() && !name.is_empty()).then_some((symbol, name))
+            })
+            .collect();
         self.refresh_seconds = self.refresh_seconds.clamp(5, 86_400);
         self.scroll_speed = if self.scroll_speed.is_finite() {
             self.scroll_speed.clamp(0.0, 1000.0)
@@ -166,6 +185,7 @@ mod tests {
         let parsed = parse(DEFAULT_CONFIG).expect("default config parses");
         let default = Config::default();
         assert_eq!(parsed.symbols, default.symbols);
+        assert_eq!(parsed.names, default.names);
         assert_eq!(parsed.refresh_seconds, default.refresh_seconds);
         assert_eq!(parsed.scroll_speed, default.scroll_speed);
         assert_eq!(parsed.font_size, default.font_size);
@@ -182,6 +202,44 @@ mod tests {
     #[test]
     fn empty_symbols_is_an_error() {
         assert!(parse("symbols = []").is_err());
+    }
+
+    #[test]
+    fn names_match_normalized_symbols_and_keep_their_case() {
+        let cfg = parse(
+            r#"
+symbols = ["BZ=F", "^GSPC"]
+[names]
+" bz=f " = "  Brent "
+"^GSPC" = "S&P 500"
+"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.names.len(), 2);
+        assert_eq!(cfg.names["BZ=F"], "Brent");
+        assert_eq!(cfg.names["^GSPC"], "S&P 500");
+    }
+
+    #[test]
+    fn blank_names_are_dropped_so_the_symbol_shows() {
+        let cfg = parse("symbols = [\"AAPL\"]\n[names]\nAAPL = \"  \"\n\"\" = \"x\"").unwrap();
+        assert!(cfg.names.is_empty());
+    }
+
+    #[test]
+    fn a_name_that_is_not_text_is_reported_with_its_line() {
+        let err = parse("symbols = [\"AAPL\"]\n[names]\nAAPL = 5").unwrap_err();
+        assert!(
+            err.starts_with("line 3:") && err.contains("expected"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn keys_below_the_names_table_belong_to_it() {
+        // The mistake the comment in the default config warns about: it is caught, with a line.
+        let err = parse("[names]\nAAPL = \"Apple\"\nfps = 30").unwrap_err();
+        assert!(err.starts_with("line 3:"), "{err}");
     }
 
     #[test]
