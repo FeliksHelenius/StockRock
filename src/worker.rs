@@ -265,7 +265,7 @@ mod tests {
     fn quote(price: f64) -> Quote {
         Quote {
             price,
-            prev_close: price - 1.0,
+            prev_close: Some(price - 1.0),
         }
     }
 

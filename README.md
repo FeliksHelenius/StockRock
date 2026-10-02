@@ -71,13 +71,27 @@ product, so its price only comes from that broker); `BZ=F` is the Brent futures 
 CFDs track. It should be close to a broker's quote but can differ a little, notably around contract
 rollovers.
 
+**BlackBull Markets prices:** write the symbol as `blackbull:` plus BlackBull's instrument name to
+read the price from BlackBull's own public feed (the one their instrument pages use), for example
+`"blackbull:BRENT"` for Crude Oil Brent (Cash) or `"blackbull:XAUUSD"` for gold. It shows the sell
+(bid) price. That feed has no previous close, so these symbols show the price without a change
+figure.
+
+```toml
+symbols = ["AAPL", "blackbull:BRENT"]
+
+[names]
+"blackbull:BRENT" = "Brent Cash"
+```
+
 To start with Windows, put a shortcut to the exe in the folder opened by <kbd>Win</kbd>+<kbd>R</kbd>
 → `shell:startup`.
 
 ## Data source
 
-Quotes come from Yahoo Finance's public chart endpoint, which needs no API key. It is
-**unofficial**: it can change or rate-limit without notice, and prices may be delayed. Shown prices
+Quotes come from Yahoo Finance's public chart endpoint, which needs no API key (and, for
+`blackbull:` symbols, from BlackBull's public price feed). Both are
+**unofficial**: they can change or rate-limit without notice, and prices may be delayed. Shown prices
 are the regular-session price; the change is relative to the previous close. All of the provider
 specifics live in [`src/quotes.rs`](src/quotes.rs), so swapping in another source is a local change.
 

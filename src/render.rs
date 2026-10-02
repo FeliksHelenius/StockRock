@@ -311,7 +311,24 @@ impl Renderer {
         };
 
         let decimals = decimals(quote.price);
-        let change = quote.change();
+        let (Some(change), Some(change_pct)) = (quote.change(), quote.change_pct()) else {
+            // No previous close from this source: show the price alone.
+            let price_color = if entry.stale {
+                PALETTE.dim
+            } else {
+                PALETTE.price
+            };
+            return Item::new(vec![
+                symbol,
+                self.run(
+                    &group(quote.price, decimals),
+                    self.fonts.price,
+                    price_color,
+                    0,
+                    0,
+                ),
+            ]);
+        };
         let (arrow, mut color) = match (change * 10f64.powi(decimals as i32)).round() {
             r if r > 0.0 => ("\u{25B2}", PALETTE.up),
             r if r < 0.0 => ("\u{25BC}", PALETTE.down),
@@ -326,7 +343,7 @@ impl Renderer {
         let delta = format!(
             "{} ({:.2}%)",
             group(change.abs(), decimals),
-            quote.change_pct().abs()
+            change_pct.abs()
         );
 
         Item::new(vec![
