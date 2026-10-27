@@ -109,20 +109,30 @@ fn parse(status: u32, body: &[u8]) -> Result<Quote, String> {
     })
 }
 
-/// BlackBull's own instrument pages poll this endpoint. It returns the live MT5 bid/ask but no
-/// previous close, so the quote has no change figure.
+/// BlackBull's instrument pages poll the bid endpoint. It has no previous close, so the quote has
+/// no change figure. Gold, silver and forex are absent from that feed ("no symbol or id in
+/// database"); the same snapshot's bid is on the instrument metadata endpoint, so that is the
+/// fallback.
 fn fetch_blackbull(http: &Http, name: &str) -> Result<Quote, String> {
-    let path = format!(
-        "/wp-json/bbm/get_bid/?action=bid&symbol={}",
-        percent_encode(name)
-    );
-    let response = http.get(BLACKBULL_HOST, &path)?;
-    parse_blackbull(response.status, &response.body)
+    let name = percent_encode(name);
+    let response = http.get(
+        BLACKBULL_HOST,
+        &format!("/wp-json/bbm/get_bid/?action=bid&symbol={name}"),
+    )?;
+    if let Ok(quote) = parse_blackbull(response.status, &response.body) {
+        return Ok(quote);
+    }
+    let response = http.get(
+        BLACKBULL_HOST,
+        &format!("/wp-json/bbm/get_symbol_meta?symbol={name}"),
+    )?;
+    parse_blackbull_meta(response.status, &response.body)
 }
 
 #[derive(Deserialize)]
 struct BlackBullBid {
     result: Option<String>,
+    message: Option<String>,
     sell: Option<String>,
 }
 
@@ -134,7 +144,11 @@ fn parse_blackbull(status: u32, body: &[u8]) -> Result<Quote, String> {
         });
     };
     if bid.result.as_deref() != Some("OK") {
-        return Err(bid.result.unwrap_or_else(|| "no data".into()));
+        return Err(bid
+            .message
+            .filter(|message| !message.is_empty())
+            .or(bid.result)
+            .unwrap_or_else(|| "no data".into()));
     }
     // The page shows the sell (bid) price as the instrument's price.
     let price = bid
@@ -146,6 +160,57 @@ fn parse_blackbull(status: u32, body: &[u8]) -> Result<Quote, String> {
         price,
         prev_close: None,
     })
+}
+
+/// `get_symbol_meta` returns one JSON string of HTML: `key = value` lines separated by `<br>`.
+/// `price_bid` is the sell price. `price_close` is the stored session close, not a previous close
+/// for the live bid, so it is not shown as a change.
+fn parse_blackbull_meta(status: u32, body: &[u8]) -> Result<Quote, String> {
+    let text = decode_meta(body).ok_or_else(|| match status {
+        200 => "unexpected response".into(),
+        other => format!("HTTP {other}"),
+    })?;
+    let Some(raw) = meta_field(&text, "price_bid") else {
+        return Err(if meta_field(&text, "symbol").is_some() {
+            "no price".into()
+        } else {
+            "Symbol not found".into()
+        });
+    };
+    let price = raw
+        .parse::<f64>()
+        .ok()
+        .filter(|p| p.is_finite() && *p > 0.0)
+        .ok_or("no price")?;
+    Ok(Quote {
+        price,
+        prev_close: None,
+    })
+}
+
+fn decode_meta(body: &[u8]) -> Option<String> {
+    if let Ok(text) = serde_json::from_slice::<String>(body) {
+        return Some(text);
+    }
+    let text = String::from_utf8(body.to_vec()).ok()?;
+    if text.contains("price_bid") || text.contains("<body>") {
+        Some(text)
+    } else {
+        None
+    }
+}
+
+fn meta_field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    let marker = format!("{key} = ");
+    let start = text.find(&marker)? + marker.len();
+    let value = &text[start..];
+    let end = value.find(['<', '\n', '\r']).unwrap_or(value.len());
+    let value = value[..end].trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
 }
 
 /// Percent-encodes everything outside the URL "unreserved" set (`^GSPC` -> `%5EGSPC`).
@@ -249,6 +314,47 @@ mod tests {
         assert_eq!(parse_blackbull(503, b"").unwrap_err(), "HTTP 503");
         assert_eq!(
             parse_blackbull(200, b"<html>").unwrap_err(),
+            "unexpected response"
+        );
+        assert_eq!(
+            parse_blackbull(
+                404,
+                br#"{"result":"ERROR","message":"no symbol or id in database"}"#
+            )
+            .unwrap_err(),
+            "no symbol or id in database"
+        );
+    }
+
+    #[test]
+    fn parses_a_blackbull_metadata_bid() {
+        // The endpoint returns a JSON string of HTML, which is how gold is published.
+        let body = br#""<html><body>symbol = XAUUSD<br>price_bid = 4025.33<br>price_ask = 4025.45<br>price_close = 4016.89<br></body></html>""#;
+        assert_eq!(
+            parse_blackbull_meta(200, body).unwrap(),
+            Quote {
+                price: 4025.33,
+                prev_close: None
+            }
+        );
+        let raw = br#"<html><body>symbol = EURUSD<br>price_bid = 1.11496<br></body></html>"#;
+        assert_eq!(parse_blackbull_meta(200, raw).unwrap().price, 1.11496);
+    }
+
+    #[test]
+    fn blackbull_metadata_errors_are_reported() {
+        assert_eq!(
+            parse_blackbull_meta(200, br#""<html><body></body></html>""#).unwrap_err(),
+            "Symbol not found"
+        );
+        assert_eq!(
+            parse_blackbull_meta(200, br#""<html><body>symbol = XAUUSD<br>price_bid = 0<br></body></html>""#)
+                .unwrap_err(),
+            "no price"
+        );
+        assert_eq!(parse_blackbull_meta(503, b"").unwrap_err(), "HTTP 503");
+        assert_eq!(
+            parse_blackbull_meta(200, b"{}").unwrap_err(),
             "unexpected response"
         );
     }

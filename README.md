@@ -72,10 +72,10 @@ CFDs track. It should be close to a broker's quote but can differ a little, nota
 rollovers.
 
 **BlackBull Markets prices:** write the symbol as `blackbull:` plus BlackBull's instrument name to
-read the price from BlackBull's own public feed (the one their instrument pages use), for example
-`"blackbull:BRENT"` for Crude Oil Brent (Cash) or `"blackbull:XAUUSD"` for gold. It shows the sell
-(bid) price. That feed has no previous close, so these symbols show the price without a change
-figure.
+read the sell (bid) price from BlackBull's public feed, for example `"blackbull:BRENT"` for Crude
+Oil Brent (Cash) or `"blackbull:XAUUSD"` for gold. Instruments the bid feed does not list (gold,
+silver, forex) are read from the same site's instrument metadata, which carries that snapshot's
+bid. Neither source has a previous close, so these symbols show the price without a change figure.
 
 ```toml
 symbols = ["AAPL", "blackbull:BRENT"]
